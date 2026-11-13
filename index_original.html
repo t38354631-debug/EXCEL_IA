@@ -1,0 +1,459 @@
+// ---------------------------------------------
+// IMPORTAÇÃO E LEITURA DO EXCEL
+// ---------------------------------------------
+
+// Converte uma linha da planilha em um pedido
+function converterLinhaPedido(linha) {
+  const quantidade = numero(linha["Quantidade"]);
+  const valorUnitario = numero(linha["Valor Unitário"]);
+  const frete = numero(linha["Frete"]);
+
+  return {
+    pedido: numero(linha["Pedido"]),
+    regiao: linha["Região"] || "",
+    estado: String(linha["Estado"] || "").toUpperCase(),
+    produto: linha["Produtos"] || "",
+    data: converterData(linha["Data"]),
+    quantidade,
+    valorUnitario,
+    frete,
+
+    // O total é recalculado para acompanhar mudanças na quantidade,
+    // no preço unitário ou no frete.
+    total: quantidade * valorUnitario + frete
+  };
+}
+
+// Lê os dados de um arquivo Excel e atualiza o dashboard
+async function processarArquivoExcel(arquivo, automatico = false, bufferExistente = null) {
+  if (!window.XLSX) {
+    throw new Error("A biblioteca Excel não foi carregada.");
+  }
+
+  const buffer = bufferExistente || await arquivo.arrayBuffer();
+
+  const workbook = XLSX.read(buffer, {
+    type: "array",
+    cellDates: true
+  });
+
+  const nomeAba = workbook.SheetNames[0];
+
+  if (!nomeAba) {
+    throw new Error("A planilha não possui nenhuma aba.");
+  }
+
+  const primeiraAba = workbook.Sheets[nomeAba];
+
+  const linhas = XLSX.utils.sheet_to_json(
+    primeiraAba,
+    { defval: "" }
+  );
+
+  const pedidosImportados = linhas
+    .filter((linha) =>
+      linha["Pedido"] !== "" &&
+      linha["Pedido"] !== null &&
+      linha["Pedido"] !== undefined
+    )
+    .map(converterLinhaPedido)
+    .filter((pedido) => pedido.pedido);
+
+  // Permite que a planilha fique sem registros, desde que tenha sido lida.
+  pedidos = pedidosImportados;
+
+  reconstruirCatalogo(linhas, pedidos);
+  salvarDados();
+  atualizarDashboard();
+
+  if ($("dataStatus")) {
+    $("dataStatus").textContent = automatico
+      ? `Excel atualizado às ${new Date().toLocaleTimeString("pt-BR")}`
+      : `${pedidos.length} registros carregados`;
+  }
+
+  return pedidos.length;
+}
+
+// Importação manual pelo input de arquivo existente no HTML
+async function importarExcel(evento) {
+  const arquivo = evento.target.files[0];
+  if (!arquivo) return;
+
+  try {
+    const quantidade = await processarArquivoExcel(arquivo, false);
+
+    alert(`Importação concluída: ${quantidade} pedidos carregados.`);
+  } catch (erro) {
+    console.error("Erro ao importar Excel:", erro);
+
+    alert(
+      "Não foi possível importar a planilha. Confira o arquivo e os nomes das colunas."
+    );
+  } finally {
+    evento.target.value = "";
+  }
+}
+
+// ---------------------------------------------
+// MONITORAMENTO AUTOMÁTICO DO ARQUIVO LOCAL
+// ---------------------------------------------
+
+// Gera uma assinatura do conteúdo. Assim, também detecta alterações
+// quando o tamanho do arquivo permanece igual.
+function gerarAssinaturaArquivo(buffer, arquivo) {
+  const bytes = new Uint8Array(buffer);
+  let hash = 2166136261;
+
+  for (let i = 0; i < bytes.length; i++) {
+    hash ^= bytes[i];
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return `${arquivo.lastModified}-${arquivo.size}-${hash >>> 0}`;
+}
+
+function iniciarMonitoramentoExcel() {
+  if (monitoramentoExcel) {
+    clearInterval(monitoramentoExcel);
+  }
+
+  monitoramentoExcel = setInterval(
+    verificarAlteracaoExcel,
+    2000
+  );
+}
+
+async function verificarAlteracaoExcel() {
+  if (!arquivoExcelHandle || verificandoExcel) return;
+
+  verificandoExcel = true;
+
+  try {
+    const permissao = await arquivoExcelHandle.queryPermission({
+      mode: "read"
+    });
+
+    if (permissao !== "granted") {
+      if ($("dataStatus")) {
+        $("dataStatus").textContent =
+          "Acesso ao Excel pausado. Reconecte o arquivo.";
+      }
+
+      clearInterval(monitoramentoExcel);
+      monitoramentoExcel = null;
+      return;
+    }
+
+    const arquivo = await arquivoExcelHandle.getFile();
+    const buffer = await arquivo.arrayBuffer();
+    const assinatura = gerarAssinaturaArquivo(buffer, arquivo);
+
+    if (assinatura !== ultimaModificacaoExcel) {
+      await processarArquivoExcel(arquivo, true, buffer);
+      ultimaModificacaoExcel = assinatura;
+
+      console.log("Dashboard atualizado com a versão mais recente do Excel.");
+    }
+  } catch (erro) {
+    // Se o Excel estiver salvando ou temporariamente bloqueado,
+    // a próxima verificação tentará novamente.
+    console.warn("Não foi possível verificar o Excel nesta tentativa:", erro);
+  } finally {
+    verificandoExcel = false;
+  }
+}
+
+// Cria o botão de conexão com o Excel
+function criarBotaoConexaoExcel() {
+  const campoExcel = $("excelInput");
+
+  if (!campoExcel || $("connectExcelBtn")) return;
+
+  const botao = document.createElement("button");
+
+  botao.id = "connectExcelBtn";
+  botao.type = "button";
+  botao.textContent = "Conectar arquivo Excel";
+  botao.className = "btn btn-primary";
+  botao.style.marginLeft = "10px";
+
+  botao.addEventListener("click", conectarArquivoExcel);
+
+  campoExcel.insertAdjacentElement("afterend", botao);
+}
+
+// Abre o seletor de arquivos e conecta a planilha local
+async function conectarArquivoExcel() {
+  if (!window.showOpenFilePicker) {
+    alert(
+      "Seu navegador não oferece suporte à conexão automática. " +
+      "Use uma versão atualizada do Google Chrome ou Microsoft Edge " +
+      "e abra o projeto pelo Live Server (localhost)."
+    );
+    return;
+  }
+
+  try {
+    const arquivos = await window.showOpenFilePicker({
+      multiple: false,
+      types: [{
+        description: "Planilhas Excel",
+        accept: {
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+          "application/vnd.ms-excel": [".xls"]
+        }
+      }]
+    });
+
+    if (!arquivos || !arquivos[0]) return;
+
+    const novoHandle = arquivos[0];
+
+    const permissao = await novoHandle.requestPermission({
+      mode: "read"
+    });
+
+    if (permissao !== "granted") {
+      alert("Permissão de leitura do arquivo não concedida.");
+      return;
+    }
+
+    arquivoExcelHandle = novoHandle;
+
+    const arquivo = await arquivoExcelHandle.getFile();
+    const buffer = await arquivo.arrayBuffer();
+
+    const quantidade = await processarArquivoExcel(
+      arquivo,
+      false,
+      buffer
+    );
+
+    ultimaModificacaoExcel =
+      gerarAssinaturaArquivo(buffer, arquivo);
+
+    iniciarMonitoramentoExcel();
+
+    if ($("dataStatus")) {
+      $("dataStatus").textContent =
+        `Excel conectado: ${quantidade} registros monitorados`;
+    }
+
+    alert(
+      "Planilha conectada com sucesso!\n\n" +
+      "Salve as alterações no Excel para que o dashboard seja atualizado."
+    );
+  } catch (erro) {
+    if (erro.name !== "AbortError") {
+      console.error("Erro ao conectar Excel:", erro);
+      alert("Não foi possível conectar a planilha. Verifique o arquivo e as permissões.");
+    }
+  }
+}
+
+// ---------------------------------------------
+// FORMULÁRIO DE CADASTRO
+// ---------------------------------------------
+
+function atualizarTotalPreview() {
+  const quantidade = numero($("quantidade")?.value);
+  const valorUnitario = numero($("valorUnitario")?.value);
+  const frete = numero($("frete")?.value);
+
+  const total = quantidade * valorUnitario + frete;
+
+  if ($("totalPreview")) {
+    $("totalPreview").textContent = moeda(total);
+  }
+}
+
+function cadastrarPedido(evento) {
+  evento.preventDefault();
+
+  const novoPedido = numero($("pedido")?.value);
+
+  if (!novoPedido) {
+    if ($("formMessage")) {
+      $("formMessage").textContent = "Informe um número de pedido válido.";
+    }
+    return;
+  }
+
+  const pedidoExiste = pedidos.some(
+    (pedido) => numero(pedido.pedido) === novoPedido
+  );
+
+  if (pedidoExiste) {
+    if ($("formMessage")) {
+      $("formMessage").textContent =
+        "Esse número de pedido já existe. Informe outro número.";
+    }
+    return;
+  }
+
+  const quantidade = numero($("quantidade")?.value);
+  const valorUnitario = numero($("valorUnitario")?.value);
+  const frete = numero($("frete")?.value);
+
+  const registro = {
+    pedido: novoPedido,
+    data: $("data")?.value || dataLocalISO(),
+    regiao: $("regiao")?.value || "",
+    estado: ($("estado")?.value || "").trim().toUpperCase(),
+    produto: $("produto")?.value || "",
+    quantidade,
+    valorUnitario,
+    frete,
+    total: quantidade * valorUnitario + frete
+  };
+
+  pedidos.push(registro);
+
+  adicionarProdutoCatalogo(
+    registro.produto,
+    registro.valorUnitario
+  );
+
+  salvarDados();
+  atualizarListaProdutos();
+  atualizarDashboard();
+
+  if ($("formMessage")) {
+    $("formMessage").textContent =
+      `Pedido ${novoPedido} cadastrado com sucesso!`;
+  }
+
+  $("orderForm")?.reset();
+
+  if ($("pedido")) {
+    $("pedido").value = Math.max(
+      1000,
+      ...pedidos.map((pedido) => numero(pedido.pedido))
+    ) + 1;
+  }
+
+  if ($("data")) $("data").value = dataLocalISO();
+
+  atualizarTotalPreview();
+}
+
+// ---------------------------------------------
+// EXPORTAÇÃO PARA EXCEL
+// ---------------------------------------------
+
+function exportarExcel() {
+  if (!window.XLSX) {
+    alert("A biblioteca Excel não foi carregada.");
+    return;
+  }
+
+  if (pedidos.length === 0) {
+    alert("Não existem pedidos para exportar.");
+    return;
+  }
+
+  const dados = pedidos.map((pedido) => ({
+    "Pedido": pedido.pedido,
+    "Região": pedido.regiao,
+    "Estado": pedido.estado,
+    "Produtos": pedido.produto,
+    "Data": pedido.data,
+    "Quantidade": pedido.quantidade,
+    "Valor Unitário": pedido.valorUnitario,
+    "Frete": pedido.frete,
+    "Total": pedido.total
+  }));
+
+  const planilha = XLSX.utils.json_to_sheet(dados);
+  const arquivo = XLSX.utils.book_new();
+
+  XLSX.utils.book_append_sheet(
+    arquivo,
+    planilha,
+    "Vendas"
+  );
+
+  XLSX.writeFile(
+    arquivo,
+    "base_vendas_atualizada.xlsx"
+  );
+}
+
+// ---------------------------------------------
+// INICIALIZAÇÃO DO DASHBOARD
+// ---------------------------------------------
+
+function iniciarDashboard() {
+  criarBotaoConexaoExcel();
+
+  if ($("excelInput")) {
+    $("excelInput").addEventListener("change", importarExcel);
+  }
+
+  if ($("orderForm")) {
+    $("orderForm").addEventListener("submit", cadastrarPedido);
+
+    $("orderForm").addEventListener("reset", () => {
+      setTimeout(() => {
+        if ($("formMessage")) {
+          $("formMessage").textContent = "";
+        }
+
+        atualizarTotalPreview();
+      }, 0);
+    });
+  }
+
+  ["quantidade", "valorUnitario", "frete"].forEach((id) => {
+    if ($(id)) {
+      $(id).addEventListener("input", atualizarTotalPreview);
+    }
+  });
+
+  if ($("produto")) {
+    $("produto").addEventListener("change", () => {
+      const preco = catalogo.get($("produto").value);
+
+      if (preco !== undefined && $("valorUnitario")) {
+        $("valorUnitario").value = preco;
+      }
+
+      atualizarTotalPreview();
+    });
+  }
+
+  if ($("searchInput")) {
+    $("searchInput").addEventListener("input", (evento) => {
+      atualizarTabela(evento.target.value);
+    });
+  }
+
+  if ($("exportBtn")) {
+    $("exportBtn").addEventListener("click", exportarExcel);
+  }
+
+  if ($("data") && !$("data").value) {
+    $("data").value = dataLocalISO();
+  }
+
+  if ($("pedido")) {
+    $("pedido").value = Math.max(
+      1000,
+      ...pedidos.map((pedido) => numero(pedido.pedido))
+    ) + 1;
+  }
+
+  pedidos.forEach((pedido) => {
+    adicionarProdutoCatalogo(
+      pedido.produto,
+      pedido.valorUnitario
+    );
+  });
+
+  atualizarListaProdutos();
+  atualizarDashboard();
+  atualizarTotalPreview();
+}
+
+document.addEventListener("DOMContentLoaded", iniciarDashboard);

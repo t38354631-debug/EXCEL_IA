@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard de Vendas</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-mark">V</div><div><strong>Vendas</strong><small>PAINEL DE GESTÃO</small></div></div>
+    <nav>
+      <a class="active" href="#visao">▦ <span>Visão geral</span></a>
+      <a href="#cadastro">＋ <span>Novo pedido</span></a>
+      <a href="#historico">▤ <span>Histórico</span></a>
+    </nav>
+    <div class="side-note">Sistema de acompanhamento comercial</div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div><p class="eyebrow">GESTÃO COMERCIAL</p><h1>Dashboard de vendas</h1><p class="muted">Acompanhe os resultados e gerencie seus pedidos.</p></div>
+      <div class="top-actions">
+        <label class="button secondary" for="excelInput">Importar Excel</label>
+        <input id="excelInput" type="file" accept=".xlsx,.xls,.csv" hidden>
+        <button class="button primary" id="exportBtn">Exportar Excel</button>
+      </div>
+    </header>
+
+    <section id="visao">
+      <div class="section-heading"><div><h2>Visão geral</h2><p class="muted">Indicadores atualizados conforme os registros cadastrados.</p></div><span id="dataStatus" class="status">Aguardando importação da planilha</span></div>
+      <div class="kpis">
+        <article class="kpi"><span>Faturamento total</span><strong id="kpiRevenue">R$ 0,00</strong><small>Somatório dos pedidos</small></article>
+        <article class="kpi"><span>Pedidos cadastrados</span><strong id="kpiOrders">0</strong><small>Quantidade de registros</small></article>
+        <article class="kpi"><span>Unidades vendidas</span><strong id="kpiUnits">0</strong><small>Quantidade de produtos</small></article>
+        <article class="kpi"><span>Ticket médio</span><strong id="kpiTicket">R$ 0,00</strong><small>Faturamento por pedido</small></article>
+      </div>
+      <div class="charts">
+        <article class="panel chart-panel"><div class="panel-heading"><div><h3>Faturamento por mês</h3><p class="muted">Evolução das vendas</p></div></div><div class="chart-wrap"><canvas id="monthlyChart"></canvas></div></article>
+        <article class="panel chart-panel"><div class="panel-heading"><div><h3>Vendas por região</h3><p class="muted">Distribuição do faturamento</p></div></div><div class="chart-wrap"><canvas id="regionChart"></canvas></div></article>
+      </div>
+    </section>
+
+    <section id="cadastro" class="panel form-panel">
+      <div class="panel-heading"><div><h2>Cadastro de pedido</h2><p class="muted">Preencha os dados para adicionar um novo registro.</p></div><span class="step">NOVO REGISTRO</span></div>
+      <form id="orderForm">
+        <div class="form-grid">
+          <label>Número do pedido<input id="pedido" type="number" min="1" required placeholder="Ex.: 1031"></label>
+          <label>Data da venda<input id="data" type="date" required></label>
+          <label>Região<select id="regiao" required><option value="">Selecione</option><option>Região Norte</option><option>Região Nordeste</option><option>Região Centro-Oeste</option><option>Região Sudeste</option><option>Região Sul</option></select></label>
+          <label>Estado (UF)<input id="estado" maxlength="2" required placeholder="Ex.: SP"></label>
+          <label class="wide">Produto<select id="produto" required><option value="">Importe a planilha ou cadastre um produto</option></select></label>
+          <label>Quantidade<input id="quantidade" type="number" min="1" step="1" required placeholder="0"></label>
+          <label>Valor unitário (R$)<input id="valorUnitario" type="number" min="0" step="0.01" required placeholder="0,00"></label>
+          <label>Frete (R$)<input id="frete" type="number" min="0" step="0.01" value="0" required></label>
+          <div class="total-preview"><span>Total estimado do pedido</span><strong id="totalPreview">R$ 0,00</strong><small>Quantidade × valor unitário + frete</small></div>
+        </div>
+        <div class="form-actions"><button class="button secondary" type="reset">Limpar campos</button><button class="button primary" type="submit">＋ Cadastrar pedido</button></div>
+        <p id="formMessage" class="form-message" role="status"></p>
+      </form>
+    </section>
+
+    <section id="historico" class="panel table-panel">
+      <div class="panel-heading"><div><h2>Histórico de pedidos</h2><p class="muted">Consulte os registros importados e cadastrados.</p></div><input id="searchInput" class="search" type="search" placeholder="Pesquisar pedido, produto ou UF..."></div>
+      <div class="table-scroll"><table><thead><tr><th>Pedido</th><th>Data</th><th>Região</th><th>UF</th><th>Produto</th><th>Qtd.</th><th>Valor unit.</th><th>Frete</th><th>Total</th></tr></thead><tbody id="ordersBody"><tr><td colspan="9" class="empty">Importe sua planilha Excel para visualizar os registros.</td></tr></tbody></table></div>
+      <div class="table-footer"><span id="recordCount">0 registros</span><span>Os dados cadastrados ficam salvos neste navegador.</span></div>
+    </section>
+    <footer>Dashboard demonstrativo • JavaScript, SheetJS e Chart.js</footer>
+
+    <!--////-->
+
+    <section class="kpi-container">
+    <div class="kpi-card">
+        <h3>Faturamento</h3>
+        <p id="kpiRevenue">R$ 0,00</p>
+    </div>
+</section>
+
+<section class="charts-container">
+    <div class="chart-card">
+        <canvas id="monthlyChart"></canvas>
+    </div>
+
+    <div class="chart-card">
+        <canvas id="regionChart"></canvas>
+    </div>
+</section>
+
+
+<!-- NOVOS GRÁFICOS -->
+<section class="charts-container">
+
+    <div class="chart-card">
+        <h2>Faturamento por produto</h2>
+        <p>Produtos com maior contribuição financeira</p>
+        <canvas id="productChart"></canvas>
+    </div>
+
+    <div class="chart-card">
+        <h2>Pedidos por estado</h2>
+        <p>Distribuição dos pedidos por localização</p>
+        <canvas id="stateChart"></canvas>
+    </div>
+
+    <div class="chart-card">
+        <h2>Frete por região</h2>
+        <p>Comparativo dos custos de entrega</p>
+        <canvas id="shippingChart"></canvas>
+    </div>
+
+    <div class="chart-card">
+        <h2>Quantidade por produto</h2>
+        <p>Ranking de produtos mais vendidos</p>
+        <canvas id="quantityChart"></canvas>
+    </div>
+
+</section>
+
+<!-- PAINEL DE INSIGHTS -->
+<section class="insights-section">
+    <h2>Resumo inteligente de vendas</h2>
+
+    <div class="insights-grid">
+        <article class="insight-card">
+            <span>Produto mais vendido</span>
+            <strong id="topProduct">--</strong>
+            <small>Por quantidade de unidades</small>
+        </article>
+
+        <article class="insight-card">
+            <span>Estado com mais pedidos</span>
+            <strong id="topState">--</strong>
+            <small>Maior volume de pedidos</small>
+        </article>
+
+        <article class="insight-card">
+            <span>Frete total</span>
+            <strong id="totalShipping">R$ 0,00</strong>
+            <small>Somatório dos fretes</small>
+        </article>
+
+        <article class="insight-card">
+            <span>Produto com maior faturamento</span>
+            <strong id="topRevenueProduct">--</strong>
+            <small>Maior receita de produtos</small>
+        </article>
+    </div>
+</section>
+
+<!-- ÚLTIMOS PEDIDOS -->
+<section class="recent-orders">
+    <h2>Últimos pedidos registrados</h2>
+
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Pedido</th>
+                    <th>Produto</th>
+                    <th>Estado</th>
+                    <th>Quantidade</th>
+                    <th>Valor total</th>
+                </tr>
+            </thead>
+
+            <tbody id="recentOrdersBody">
+                <tr>
+                    <td colspan="5">Aguardando dados...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+  </main>
+</body>
+</html>
